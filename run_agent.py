@@ -1,10 +1,14 @@
 import sqlite3
+import re
 import ollama
+from typing import TypedDict, Optional, List, Any
+from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver 
 
 # ==========================================
-# 1. AI GENERATION LAYER (Text to SQL)
+# 1. CORE LLM FUNCTIONS (The Agent's Brain)
 # ==========================================
-def get_sql_from_llm(user_question):
+def get_sql_from_llm(user_question, error_feedback=None, history=None):
     database_schema = """
     Table: customers
     Columns:
@@ -32,110 +36,171 @@ def get_sql_from_llm(user_question):
     1. Respond ONLY with the raw SQL query. 
     2. Do NOT wrap the query in markdown code blocks like ```sql ... ```.
     3. Do NOT include any explanations, greetings, or text other than the SQL query itself.
-    4. For date matching like '2026' or 'May 2026', prefer using simple patterns like order_date LIKE '2026-%' or order_date LIKE '2026-05-%' instead of strftime functions.
-    5. If the user's request is talking about things completely missing from the schema (like spaceships, employees, cars, etc.), reply with the exact word: CLARIFY
+    4. MULTI-YEAR / RESPECTIVELY BREAKDOWNS: If the user asks for metrics broken down by year, month, or "respectively", you MUST select the year expression AND use a GROUP BY clause to return a vertical list of rows.
+
+    GOOD EXAMPLE FOR RESPECTIVELY/BREAKDOWNS:
+    User Question: "how many orders did we get in 2025 and 2026 respectively?"
+    Correct Output: SELECT strftime('%Y', order_date) AS order_year, COUNT(*) FROM orders WHERE strftime('%Y', order_date) IN ('2025', '2026') GROUP BY order_year;
+    
+    BAD EXAMPLES (NEVER DO THIS):
+    - Do NOT combine counts into subqueries horizontally.
+    - Do NOT use multiple semicolons.
     """
 
-    response = ollama.chat(
-        model='llama3',
-        messages=[
-            {'role': 'system', 'content': system_prompt},
-            {'role': 'user', 'content': user_question}
-        ]
-    )
+    messages = [{'role': 'system', 'content': system_prompt}]
+
+    if history:
+        for turn in history:
+            messages.append({'role': 'user', 'content': turn['question']})
+            messages.append({'role': 'assistant', 'content': turn['sql']})
+
+    messages.append({'role': 'user', 'content': user_question})
+
+    if error_feedback:
+        healing_context = f"""
+        ⚠️ Your previous query failed with this error:
+        {error_feedback}
+        Fix the syntax error. Output ONLY the corrected raw SQL query.
+        """
+        messages.append({'role': 'user', 'content': healing_context})
+
+    response = ollama.chat(model='llama3', messages=messages)
     return response['message']['content'].strip()
 
 
-# ==========================================
-# AI EXPLANATION LAYER (Data to Strict English)
-# ==========================================
 def get_english_explanation(user_question, db_results):
-    """Takes the raw data and user question, and returns an completely accurate sentence."""
-    
+    """Translates raw database rows into a clear, natural English sentence."""
     system_prompt = """
-    You are a highly precise Data Analyst Assistant. 
-    You will be given a user's original question and the raw data fetched from a database.
-    Your job is to read the raw database data carefully and answer the user's question directly in a clear, conversational, plain English sentence.
+    You are a precise Data Analyst Assistant. Read the raw database rows and answer the user's question directly.
     
-    CRITICAL RULE: Treat the raw database data literally. If the value inside the brackets/parentheses is a number (e.g., 3), that is the total count. Say exactly that number in your response. Never say 'one record' or 'one row' if the number itself represents a larger count.
-    """
+    CRITICAL INSTRUCTIONS FOR COMPARISONS:
+    If the database returns multiple rows (e.g., grouped values or list data), you MUST mention each value separately in your final sentence.
+    Never group them into a single total or make generalizations if the user asked for a breakdown. Be exact and literal with the rows returned.
     
-    # We clean up the db_results format to make it easier for the LLM to interpret numbers
-    user_content = f"""
-    User Question: {user_question}
-    Raw Database Data Output: {str(db_results)}
+    CRITICAL ZERO-DATA RULE:
+    If a user asks about a specific year, group, or item (like 2025), and that item is completely missing from the raw database output or returns empty results, it means the count is exactly 0.
+    Explain clearly that we have 0 records or 0 orders for that specific item. Do not say the data is unavailable or missing.
     """
-
-    response = ollama.chat(
-        model='llama3',
-        messages=[
-            {'role': 'system', 'content': system_prompt},
-            {'role': 'user', 'content': user_content}
-        ]
-    )
+    user_content = f"User Question: {user_question}\nRaw Database Output: {str(db_results)}"
+    
+    response = ollama.chat(model='llama3', messages=[
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': user_content}
+    ])
     return response['message']['content'].strip()
 
 
 # ==========================================
-# 2. DATABASE EXECUTION LAYER (SQL Runner)
+# 2. STATE & GRAPH NODES (The Engine Layout)
 # ==========================================
-def execute_query(sql_query):
+class AgentState(TypedDict):
+    user_question: str
+    generated_sql: Optional[str]
+    error_feedback: Optional[str]
+    attempt_count: int
+    db_results: Optional[List[Any]]
+    final_explanation: Optional[str]
+    chat_history: List[dict]
+
+
+def generate_query_node(state: AgentState) -> dict:
+    attempt = state.get("attempt_count", 0) + 1
+    print(f"\n[AI Workstation]: Designing query... (Attempt {attempt}/3)")
+    
+    sql = get_sql_from_llm(
+        user_question=state["user_question"], 
+        error_feedback=state.get("error_feedback"), 
+        history=state.get("chat_history", [])
+    )
+    return {"generated_sql": sql, "attempt_count": attempt}
+
+
+def execute_query_node(state: AgentState) -> dict:
+    raw_sql = state.get("generated_sql", "")
+    cleaned_sql = re.sub(r"```sql|```", "", raw_sql).strip()
+    
     try:
         conn = sqlite3.connect('ecommerce.db')
         cursor = conn.cursor()
-        
-        cursor.execute(sql_query)
+        cursor.execute(cleaned_sql)
         results = cursor.fetchall()
-        
         conn.close()
-        return results
+        
+        print("✅ [AI Workstation]: SQL executed successfully!")
+        return {"db_results": results, "error_feedback": None, "generated_sql": cleaned_sql}
     except Exception as e:
-        return f"SQL_ERROR: {e}"
+        print(f"⚠️ [AI Workstation]: SQL failed -> {e}")
+        return {"error_feedback": f"Query tried: {cleaned_sql}\nError: {e}", "db_results": None}
+
+
+def explain_results_node(state: AgentState) -> dict:
+    print("[AI Workstation]: Translating raw data to plain English...")
+    explanation = get_english_explanation(state["user_question"], state["db_results"])
+    return {"final_explanation": explanation}
 
 
 # ==========================================
-# 3. THE AGENTIC LOOP (The Coordinator)
+# 3. GRAPH COMPOSITION (The Router Map)
 # ==========================================
-def run_agent():
-    print("\n==================================================")
-    print("--- Local Agentic AI Text-to-SQL System Active ---")
-    print("      (Type 'exit' or 'quit' to stop the agent)   ")
-    print("==================================================")
-    
-    while True:
-        user_question = input("\nAsk your database a question: ")
-        
-        if user_question.lower() in ['exit', 'quit']:
-            print("\nShutting down the agent. Goodbye!")
-            break
-            
-        if not user_question.strip():
-            continue
-            
-        # 1. Ask Llama 3 to create the query
-        generated_sql = get_sql_from_llm(user_question)
-        
-        # 2. Guardrail Check
-        if "CLARIFY" in generated_sql.upper() or "PLEASE" in generated_sql.upper():
-            print("\n[Agent Response]: I'm sorry, I cannot find that information in the current database schema. Could you please rephrase or ask about customers or orders?")
-            continue
+builder = StateGraph(AgentState)
+builder.add_node("generate_query", generate_query_node)
+builder.add_node("execute_query", execute_query_node)
+builder.add_node("explain_results", explain_results_node)
 
-        print(f"\n[Agent Thought]: Generated SQL -> {generated_sql}")
+builder.set_entry_point("generate_query")
+builder.add_edge("generate_query", "execute_query")
 
-        # 3. Execute the SQL query
-        db_results = execute_query(generated_sql)
+def route_after_execution(state: AgentState) -> str:
+    if state.get("error_feedback") is not None:
+        if state.get("attempt_count", 0) < 3: 
+            return "retry"
+        return "fail"
+    return "success"
 
-        # 4. Handle results/non-existing data cases gracefully
-        if isinstance(db_results, str) and db_results.startswith("SQL_ERROR"):
-            print(f"\n[Agent Response]: Oops, I generated an invalid query. Error: {db_results}")
-            
-        elif len(db_results) == 0:
-            print("\n[Agent Response]: I ran the query successfully, but there is no data matching your request in the database.")
-            
-        else:
-            # Pass results to our strict AI explanation layer
-            english_answer = get_english_explanation(user_question, db_results)
-            print(f"\n[Agent Response]: {english_answer}")
+builder.add_conditional_edges(
+    "execute_query", 
+    route_after_execution, 
+    {"retry": "generate_query", "fail": END, "success": "explain_results"}
+)
+builder.add_edge("explain_results", END)
 
+sql_agent = builder.compile(checkpointer=MemorySaver())
+
+
+# ==========================================
+# 4. RUNTIME TERMINAL LOOP
+# ==========================================
 if __name__ == "__main__":
-    run_agent()
+    config = {"configurable": {"thread_id": "session_1"}}
+    session_history = []
+    
+    print("\n=======================================================")
+    print("--- Text-to-SQL Agent with Real Context Memory ---")
+    print("=======================================================")
+
+    while True:
+        question = input("\nAsk your database a question: ")
+        if question.lower() in ['exit', 'quit']: break
+        if not question.strip(): continue
+
+        initial_state: AgentState = {
+            "user_question": question, 
+            "attempt_count": 0, 
+            "error_feedback": None,
+            "generated_sql": None,
+            "db_results": None,
+            "final_explanation": None,
+            "chat_history": session_history
+        }
+        
+        output = sql_agent.invoke(initial_state, config=config)
+
+        if output.get("final_explanation"):
+            print(f"\n[Final System Response]: {output.get('final_explanation')}")
+            print(f"📊 (Under the hood SQL used: {output.get('generated_sql')})")
+            
+            # Save this turn into history for the next round
+            session_history.append({
+                "question": question,
+                "sql": output.get("generated_sql")
+            })
