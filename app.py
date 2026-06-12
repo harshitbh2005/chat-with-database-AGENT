@@ -61,6 +61,11 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
         
         config = {"configurable": {"thread_id": "streamlit_session"}}
         
+        # Initialize variables to hold final outputs from the stream
+        final_explanation = None
+        final_sql = None
+        error_feedback = None
+
         # ============================================================
         # VERBOSE STATUS CONTAINER FOR LANGGRAPH STEP STREAMING
         # ============================================================
@@ -68,10 +73,19 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             # Use .stream to track execution states live node-by-node
             for chunk in sql_agent.stream(initial_state, config=config, stream_mode="updates"):
                 for node_name, state_update in chunk.items():
+                    
+                    # Capture updates to state variables as they are streamed out
+                    if "generated_sql" in state_update:
+                        final_sql = state_update["generated_sql"]
+                    if "final_explanation" in state_update:
+                        final_explanation = state_update["final_explanation"]
+                    if "error_feedback" in state_update:
+                        error_feedback = state_update["error_feedback"]
+
                     if node_name == "generate_query":
-                        # Fetch the upcoming execution attempt number safely
-                        current_attempt = sql_agent.get_state(config).values.get("attempt_count", 1)
-                        status.write(f"📝 **Node `generate_query` (Attempt {current_attempt}/3):** Llama 3.1 is evaluating the schema rules and crafting raw SQL syntax...")
+                        # Safely calculate the current attempt log string
+                        attempt = state_update.get("attempt_count", 1)
+                        status.write(f"📝 **Node `generate_query` (Attempt {attempt}/3):** Llama 3.1 is evaluating the schema rules and crafting raw SQL syntax...")
                     
                     elif node_name == "execute_query":
                         if state_update.get("error_feedback"):
@@ -85,30 +99,29 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             # Finish up container workflow animation
             status.update(label="✅ LangGraph Execution Completed Successfully!", state="complete", expanded=False)
         
-        # Extract the complete compiled state output directly from memory saver thread
-        output = sql_agent.get_state(config).values
+        # ============================================================
+        # RENDER EXTRACTED OUTPUTS FROM STREAM CHUNKS
+        # ============================================================
         
         # Render responses based on state exit outcomes
-        if output.get("error_feedback"):
+        if error_feedback and not final_explanation:
             error_msg = "❌ Sorry, I couldn't resolve the database query syntax safely within 3 automated tries."
             explanation_placeholder.markdown(error_msg)
             status_box.error("Graph Ended: Execution Failures encountered.")
             st.session_state.web_history.append({"role": "assistant", "content": error_msg})
         
-        elif output.get("final_explanation"):
-            final_ans = output.get("final_explanation")
-            final_sql = output.get("generated_sql")
-            
+        elif final_explanation:
             # Print values cleanly onto display slots
-            explanation_placeholder.markdown(final_ans)
-            sql_placeholder.code(final_sql, language="sql")
+            explanation_placeholder.markdown(final_explanation)
+            if final_sql:
+                sql_placeholder.code(final_sql, language="sql")
             
             status_box.success("✅ Execution Completed Successfully!")
             
             # Save elements to persistent visual context loops
             st.session_state.web_history.append({
                 "role": "assistant", 
-                "content": final_ans,
+                "content": final_explanation,
                 "sql": final_sql
             })
             
@@ -117,3 +130,4 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
                 "question": user_question,
                 "sql": final_sql
             })
+
