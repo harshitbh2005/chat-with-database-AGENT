@@ -1,5 +1,6 @@
 import streamlit as st
 from run_agent import sql_agent, AgentState
+import time  # NEW: Added to create unique thread configurations
 
 # 1. Page Configurations
 st.set_page_config(
@@ -59,7 +60,9 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             "chat_history": st.session_state.graph_history
         }
         
-        config = {"configurable": {"thread_id": "streamlit_session"}}
+        # FIX: Generate a unique thread ID based on current time so the attempt loop completely resets
+        unique_thread_id = f"session_{int(time.time())}"
+        config = {"configurable": {"thread_id": unique_thread_id}}
 
         # ============================================================
         # VERBOSE STATUS CONTAINER FOR LANGGRAPH STEP STREAMING
@@ -70,6 +73,7 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
                 for node_name, state_update in chunk.items():
                     
                     if node_name == "generate_query":
+                        # Fetch the loop's current iteration dynamically from the active state update
                         attempt = state_update.get("attempt_count", 1)
                         status.write(f"📝 **Node `generate_query` (Attempt {attempt}/3):** Llama 3.1 is evaluating the schema rules and crafting raw SQL syntax...")
                     
@@ -86,7 +90,7 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             status.update(label="✅ LangGraph Execution Completed Successfully!", state="complete", expanded=False)
         
         # ============================================================
-        # FIX: EXTRACT UNIFIED STATE DIRECTLY FROM THE SAVED THREAD
+        # EXTRACT UNIFIED STATE DIRECTLY FROM THE SPECIFIC THREAD
         # ============================================================
         compiled_state = sql_agent.get_state(config).values
         
