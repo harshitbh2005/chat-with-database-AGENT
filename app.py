@@ -4,14 +4,66 @@ import sqlite3
 from run_agent import sql_agent, AgentState
 
 # ============================================================
-# AUTOMATIC CLOUD DATABASE INITIALIZATION CHECK
+# FIXED AUTOMATIC DATABASE INITIALIZER (NO NULL BYTE IMPORT)
 # ============================================================
 def verify_and_init_db():
     db_file = 'ecommerce.db'
-    # If the file doesn't exist, or exists but is completely empty (0 bytes)
+    # Check if the database doesn't exist or is an empty 0-byte file
     if not os.path.exists(db_file) or os.path.getsize(db_file) == 0:
         try:
-            import init_db
+            conn = sqlite3.connect(db_file)
+            cursor = conn.cursor()
+            
+            # Create Tables
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS customers (
+                customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                join_date DATE NOT NULL
+            );
+            """)
+            
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS orders (
+                order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id INTEGER NOT NULL,
+                product_name TEXT NOT NULL,
+                order_date DATE NOT NULL,
+                total_amount REAL NOT NULL,
+                FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
+            );
+            """)
+            
+            # Seed Starting Data safely
+            cursor.execute("SELECT COUNT(*) FROM customers")
+            if cursor.fetchone()[0] == 0:
+                cursor.executemany("""
+                INSERT INTO customers (name, email, join_date) VALUES (?, ?, ?);
+                """, [
+                    ('Alice Johnson', 'alice@example.com', '2025-01-15'),
+                    ('Bob Smith', 'bob@example.com', '2025-02-20'),
+                    ('Charlie Brown', 'charlie@example.com', '2025-03-10'),
+                    ('Diana Prince', 'diana@example.com', '2025-04-05')
+                ])
+                
+                cursor.executemany("""
+                INSERT INTO orders (customer_id, product_name, order_date, total_amount) VALUES (?, ?, ?, ?);
+                """, [
+                    (1, 'Laptop', '2025-05-10', 1200.00),
+                    (2, 'Smartphone', '2025-06-14', 800.00),
+                    (1, 'Headphones', '2025-07-22', 150.00),
+                    (3, 'Desk Chair', '2025-08-01', 250.00),
+                    (4, 'Monitor', '2025-09-18', 350.00),
+                    (2, 'Keyboard', '2025-10-05', 100.00),
+                    (3, 'Bookshelf', '2026-01-12', 180.00),
+                    (4, 'Coffee Maker', '2026-02-28', 90.00),
+                    (1, 'Tablet', '2026-03-05', 450.00),
+                    (2, 'Smart Watch', '2026-04-20', 299.99)
+                ])
+            
+            conn.commit()
+            conn.close()
             st.sidebar.success("🚀 Cloud database seeded successfully!")
         except Exception as e:
             st.sidebar.error(f"Database auto-seeding failed: {e}")
@@ -76,8 +128,7 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             "chat_history": st.session_state.graph_history
         }
         
-        # Use a dynamic unique session configuration configuration for accuracy
-        config = {"configurable": {"thread_id": f"session_{len(st.session_state.web_history)}"}}
+        config = {"configurable": {"thread_id": "streamlit_session"}}
         output = sql_agent.invoke(initial_state, config=config)
         
         # Render responses based on state exit outcomes
