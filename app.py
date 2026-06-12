@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 st.title("📊 Local Agentic AI Chat with Database")
-st.markdown("Ask natural language questions against your local SQLite `ecommerce.db` instance backed by Llama 3 & LangGraph.")
+st.markdown("Ask natural language questions against a cloud-hosted SQLite `ecommerce.db` instance backed by Llama 3.1 (via Groq API) & LangGraph.")
 
 # 2. Initialize Persistent Session States for Web Browser
 if "web_history" not in st.session_state:
