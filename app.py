@@ -60,30 +60,16 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
         }
         
         config = {"configurable": {"thread_id": "streamlit_session"}}
-        
-        # Initialize variables to hold final outputs from the stream
-        final_explanation = None
-        final_sql = None
-        error_feedback = None
 
         # ============================================================
         # VERBOSE STATUS CONTAINER FOR LANGGRAPH STEP STREAMING
         # ============================================================
         with st.status("🧠 Agent Execution Path Running...", expanded=True) as status:
-            # Use .stream to track execution states live node-by-node
+            # Use .stream to trigger nodes and animate logs live
             for chunk in sql_agent.stream(initial_state, config=config, stream_mode="updates"):
                 for node_name, state_update in chunk.items():
                     
-                    # Capture updates to state variables as they are streamed out
-                    if "generated_sql" in state_update:
-                        final_sql = state_update["generated_sql"]
-                    if "final_explanation" in state_update:
-                        final_explanation = state_update["final_explanation"]
-                    if "error_feedback" in state_update:
-                        error_feedback = state_update["error_feedback"]
-
                     if node_name == "generate_query":
-                        # Safely calculate the current attempt log string
                         attempt = state_update.get("attempt_count", 1)
                         status.write(f"📝 **Node `generate_query` (Attempt {attempt}/3):** Llama 3.1 is evaluating the schema rules and crafting raw SQL syntax...")
                     
@@ -100,8 +86,13 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             status.update(label="✅ LangGraph Execution Completed Successfully!", state="complete", expanded=False)
         
         # ============================================================
-        # RENDER EXTRACTED OUTPUTS FROM STREAM CHUNKS
+        # FIX: EXTRACT UNIFIED STATE DIRECTLY FROM THE SAVED THREAD
         # ============================================================
+        compiled_state = sql_agent.get_state(config).values
+        
+        final_explanation = compiled_state.get("final_explanation")
+        final_sql = compiled_state.get("generated_sql")
+        error_feedback = compiled_state.get("error_feedback")
         
         # Render responses based on state exit outcomes
         if error_feedback and not final_explanation:
@@ -130,4 +121,3 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
                 "question": user_question,
                 "sql": final_sql
             })
-
