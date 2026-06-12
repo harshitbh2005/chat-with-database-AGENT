@@ -64,7 +64,7 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
         
         # Render responses based on state exit outcomes
         if output.get("error_feedback"):
-            error_msg = f"❌ Sorry, I couldn't resolve the database query syntax safely within 3 automated tries."
+            error_msg = "❌ Sorry, I couldn't resolve the database query syntax safely within 3 automated tries."
             explanation_placeholder.markdown(error_msg)
             status_box.error("Graph Ended: Execution Failures encountered.")
             st.session_state.web_history.append({"role": "assistant", "content": error_msg})
