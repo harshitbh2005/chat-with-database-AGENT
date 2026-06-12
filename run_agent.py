@@ -1,9 +1,14 @@
 import sqlite3
 import re
-import ollama
+import streamlit as st  # Added to read secrets safely
+from groq import Groq   # Swapped from ollama to groq
 from typing import TypedDict, Optional, List, Any
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver 
+
+# Initialize the Groq Client safely using Streamlit secrets
+# This will pull from your local secrets file or the cloud dashboard dashboard
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 # ==========================================
 # 1. CORE LLM FUNCTIONS (The Agent's Brain)
@@ -64,8 +69,12 @@ def get_sql_from_llm(user_question, error_feedback=None, history=None):
         """
         messages.append({'role': 'user', 'content': healing_context})
 
-    response = ollama.chat(model='llama3', messages=messages)
-    return response['message']['content'].strip()
+    # Swapped from ollama.chat to cloud-hosted Groq
+    response = client.chat.completions.create(
+        model='llama-3.1-8b-instant', 
+        messages=messages
+    )
+    return response.choices[0].message.content.strip()
 
 
 def get_english_explanation(user_question, db_results):
@@ -83,11 +92,15 @@ def get_english_explanation(user_question, db_results):
     """
     user_content = f"User Question: {user_question}\nRaw Database Output: {str(db_results)}"
     
-    response = ollama.chat(model='llama3', messages=[
-        {'role': 'system', 'content': system_prompt},
-        {'role': 'user', 'content': user_content}
-    ])
-    return response['message']['content'].strip()
+    # Swapped from ollama.chat to cloud-hosted Groq
+    response = client.chat.completions.create(
+        model='llama-3.1-8b-instant',
+        messages=[
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_content}
+        ]
+    )
+    return response.choices[0].message.content.strip()
 
 
 # ==========================================
@@ -199,7 +212,6 @@ if __name__ == "__main__":
             print(f"\n[Final System Response]: {output.get('final_explanation')}")
             print(f"📊 (Under the hood SQL used: {output.get('generated_sql')})")
             
-            # Save this turn into history for the next round
             session_history.append({
                 "question": question,
                 "sql": output.get("generated_sql")
