@@ -52,26 +52,45 @@ def classify_user_intent(user_question: str) -> str:
 
 
 def get_sql_from_llm(user_question: str, error_feedback: str = None, history: list = None) -> str:
-    system_prompt = f"""You are an expert SQLite Data Assistant for Nike. Convert the user's question into valid SQL.
-    Schema:
+    """
+    Generates deterministic SQLite code based on conversation context, enforcing strict
+    relational database rules to prevent data blind spots and column hallucinations.
+    """
+    system_prompt = f"""You are an expert SQLite Data Assistant for a Nike Retail Store.
+    Convert the user's natural language question into valid, executable SQLite syntax based on the schema below.
+    
+    ### DATABASE SCHEMA Matrix:
     {DATABASE_SCHEMA}
     
-    STRICT COLUMN RULES:
-    1. Only query columns listed in the schema. Do NOT invent fields.
-    2. When using a GROUP BY clause or aggregate functions (like SUM, COUNT, AVG), you MUST explicitly include the calculated metric column in your SELECT statement (e.g., SELECT order_year, SUM(total_amount) ...). Never hide the calculation only inside the ORDER BY clause.
-    3. Return ONLY the raw executable SQL string. No markdown, no backticks.
+    ### CRITICAL COMPLIANCE RULES:
+    1. STRICT COLUMN BOUNDS: Only query columns that explicitly exist in the schema. Do NOT invent fields like 'city', 'state', 'location', 'country', 'tracking_status', 'shipping_code', or 'reviews'.
+    2. INTERPRETING LOCATION/TARGETS: If asked "where" or "which place" to promote/advertise, interpret this as finding the highest-spending or highest-ordering customer 'profession' or 'gender' segments. 
+    3. MANDATORY AGGREGATION COLUMNS: When using aggregate functions (SUM, COUNT, AVG), you MUST include the calculated metric column in your SELECT statement alongside the grouping attribute. Never hide calculations solely inside an ORDER BY clause.
+    4. NO LIMIT BLIND SPOTS ON BREAKDOWNS: For any question asking for a breakdown, comparison, distribution, or percentage (e.g., "by year", "which gender", "compare professions"), do NOT use a LIMIT clause. Return all active rows/categories so the analyst node can see the full dataset to compute accurate breakdowns.
+    5. TRANSACTION INTEGRITY: For questions regarding "purchases", "sales", "spending", or "items bought", you MUST use an INNER JOIN to link the 'customers' and 'orders' tables on customer_id to evaluate metrics based on actual orders rather than profile registries.
+    6. DETERMINISTIC RESPONSE: Output ONLY the raw executable SQL query string. Do NOT wrap output inside markdown backticks (no ```sql) and do NOT add conversational text or notes.
     """
+    
     messages = [{'role': 'system', 'content': system_prompt}]
+    
     if history:
         for turn in history:
             messages.append({'role': 'user', 'content': turn.get('question', '')})
             messages.append({'role': 'assistant', 'content': turn.get('sql', '')})
+            
     messages.append({'role': 'user', 'content': user_question})
 
     if error_feedback:
-        messages.append({'role': 'user', 'content': f"CRITICAL FIX REQUIRED: Your previous attempt failed. Fix instruction: {error_feedback}"})
+        messages.append({
+            'role': 'user', 
+            'content': f"CRITICAL REWRITE REQUIRED: Your previous query failed validation or syntax execution. Fix instruction: {error_feedback}"
+        })
 
-    response = client.chat.completions.create(model='llama-3.1-8b-instant', messages=messages, temperature=0.0)
+    response = client.chat.completions.create(
+        model='llama-3.1-8b-instant', 
+        messages=messages, 
+        temperature=0.0
+    )
     return response.choices[0].message.content.strip()
 
 
