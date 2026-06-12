@@ -8,8 +8,9 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📊 Local Agentic AI Chat with Database")
-st.markdown("Ask natural language questions against a cloud-hosted SQLite `ecommerce.db` instance backed by Llama 3.1 (via Groq API) & LangGraph.")
+# FIXED HEADER FOR CLOUD-HOSTED RECRUITER METRICS
+st.title("📊 Cloud-Agentic AI Chat with Database")
+st.markdown("Ask natural language questions against a cloud-hosted SQLite `ecommerce.db` instance backed by **Llama 3.1 (via Groq API)** & **LangGraph**.")
 
 # 2. Initialize Persistent Session States for Web Browser
 if "web_history" not in st.session_state:
@@ -40,7 +41,7 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
         st.markdown(user_question)
     st.session_state.web_history.append({"role": "user", "content": user_question})
 
-    # Render assistant bubble with spinner processing node graph
+    # Render assistant bubble with verbose processing tracker
     with st.chat_message("assistant"):
         explanation_placeholder = st.empty()
         sql_placeholder = st.empty()
@@ -58,9 +59,34 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             "chat_history": st.session_state.graph_history
         }
         
-        # Invoke compiled state machine with a fixed thread configuration
         config = {"configurable": {"thread_id": "streamlit_session"}}
-        output = sql_agent.invoke(initial_state, config=config)
+        
+        # ============================================================
+        # VERBOSE STATUS CONTAINER FOR LANGGRAPH STEP STREAMING
+        # ============================================================
+        with st.status("🧠 Agent Execution Path Running...", expanded=True) as status:
+            # Use .stream to track execution states live node-by-node
+            for chunk in sql_agent.stream(initial_state, config=config, stream_mode="updates"):
+                for node_name, state_update in chunk.items():
+                    if node_name == "generate_query":
+                        # Fetch the upcoming execution attempt number safely
+                        current_attempt = sql_agent.get_state(config).values.get("attempt_count", 1)
+                        status.write(f"📝 **Node `generate_query` (Attempt {current_attempt}/3):** Llama 3.1 is evaluating the schema rules and crafting raw SQL syntax...")
+                    
+                    elif node_name == "execute_query":
+                        if state_update.get("error_feedback"):
+                            status.write("⚠️ **Node `execute_query`:** SQLite engine returned a syntax error! Activating LangGraph self-healing loop routing...")
+                        else:
+                            status.write("📊 **Node `execute_query`:** Connection established. Executed successfully and fetched raw rows from `ecommerce.db`.")
+                    
+                    elif node_name == "explain_results":
+                        status.write("🗣️ **Node `explain_results`:** Synthesizing the relational raw table results back into a user-friendly conversational English explanation...")
+            
+            # Finish up container workflow animation
+            status.update(label="✅ LangGraph Execution Completed Successfully!", state="complete", expanded=False)
+        
+        # Extract the complete compiled state output directly from memory saver thread
+        output = sql_agent.get_state(config).values
         
         # Render responses based on state exit outcomes
         if output.get("error_feedback"):
