@@ -1,6 +1,5 @@
 import streamlit as st
 from run_agent import sql_agent, AgentState
-import time  # NEW: Added to create unique thread configurations
 
 # 1. Page Configurations
 st.set_page_config(
@@ -42,7 +41,7 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
         st.markdown(user_question)
     st.session_state.web_history.append({"role": "user", "content": user_question})
 
-    # Render assistant bubble with verbose processing tracker
+    # Render assistant bubble
     with st.chat_message("assistant"):
         explanation_placeholder = st.empty()
         sql_placeholder = st.empty()
@@ -60,43 +59,20 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             "chat_history": st.session_state.graph_history
         }
         
-        # FIX: Generate a unique thread ID based on current time so the attempt loop completely resets
-        unique_thread_id = f"session_{int(time.time())}"
-        config = {"configurable": {"thread_id": unique_thread_id}}
+        # Use a dynamic session identifier
+        config = {"configurable": {"thread_id": f"session_{len(st.session_state.web_history)}"}}
 
         # ============================================================
-        # VERBOSE STATUS CONTAINER FOR LANGGRAPH STEP STREAMING
+        # FIX: USE A SIMPLE, DURABLE LOADING CONTAINER WITHOUT STREAM LOOPS
         # ============================================================
-        with st.status("🧠 Agent Execution Path Running...", expanded=True) as status:
-            # Use .stream to trigger nodes and animate logs live
-            for chunk in sql_agent.stream(initial_state, config=config, stream_mode="updates"):
-                for node_name, state_update in chunk.items():
-                    
-                    if node_name == "generate_query":
-                        # Fetch the loop's current iteration dynamically from the active state update
-                        attempt = state_update.get("attempt_count", 1)
-                        status.write(f"📝 **Node `generate_query` (Attempt {attempt}/3):** Llama 3.1 is evaluating the schema rules and crafting raw SQL syntax...")
-                    
-                    elif node_name == "execute_query":
-                        if state_update.get("error_feedback"):
-                            status.write("⚠️ **Node `execute_query`:** SQLite engine returned a syntax error! Activating LangGraph self-healing loop routing...")
-                        else:
-                            status.write("📊 **Node `execute_query`:** Connection established. Executed successfully and fetched raw rows from `ecommerce.db`.")
-                    
-                    elif node_name == "explain_results":
-                        status.write("🗣️ **Node `explain_results`:** Synthesizing the relational raw table results back into a user-friendly conversational English explanation...")
-            
-            # Finish up container workflow animation
-            status.update(label="✅ LangGraph Execution Completed Successfully!", state="complete", expanded=False)
+        with st.spinner("🧠 LangGraph Self-Healing Agent Execution Tree Active..."):
+            # Invoke the agent directly in one single, safe operation
+            output = sql_agent.invoke(initial_state, config=config)
         
-        # ============================================================
-        # EXTRACT UNIFIED STATE DIRECTLY FROM THE SPECIFIC THREAD
-        # ============================================================
-        compiled_state = sql_agent.get_state(config).values
-        
-        final_explanation = compiled_state.get("final_explanation")
-        final_sql = compiled_state.get("generated_sql")
-        error_feedback = compiled_state.get("error_feedback")
+        # Extract variables securely
+        final_explanation = output.get("final_explanation")
+        final_sql = output.get("generated_sql")
+        error_feedback = output.get("error_feedback")
         
         # Render responses based on state exit outcomes
         if error_feedback and not final_explanation:
