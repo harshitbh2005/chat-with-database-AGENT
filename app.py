@@ -8,13 +8,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# FIXED HEADER FOR CLOUD-HOSTED RECRUITER METRICS
 st.title("📊 Cloud-Agentic AI Chat with Database")
-st.markdown("Ask natural language questions against a cloud-hosted SQLite `ecommerce.db` instance backed by **Llama 3.1 (via Groq API)** & **LangGraph**.")
+st.markdown("Ask natural language questions against a cloud-hosted SQLite `ecommerce.db` instance backed by Llama 3.1 (via Groq API) & LangGraph.")
 
 # 2. Initialize Persistent Session States for Web Browser
 if "web_history" not in st.session_state:
     st.session_state.web_history = []  # Display logs for chat bubbles
+
+if "graph_history" not in st.session_state:
+    st.session_state.graph_history = []  # Context payload lists passed to Llama 3
 
 # 3. Sidebar System Logs Layout
 with st.sidebar:
@@ -38,14 +40,14 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
         st.markdown(user_question)
     st.session_state.web_history.append({"role": "user", "content": user_question})
 
-    # Render assistant bubble
+    # Render assistant bubble with spinner processing node graph
     with st.chat_message("assistant"):
         explanation_placeholder = st.empty()
         sql_placeholder = st.empty()
         
         status_box.warning("🤖 Graph State Processing Active...")
         
-        # Build initial state with an empty history array to keep execution clean
+        # Build initial dictionary state frame matching our TypedDict schema
         initial_state: AgentState = {
             "user_question": user_question,
             "attempt_count": 0,
@@ -53,39 +55,39 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             "generated_sql": None,
             "db_results": None,
             "final_explanation": None,
-            "chat_history": []
+            "chat_history": st.session_state.graph_history
         }
         
-        # Create a completely fresh thread ID config for each turn to avoid memory leakage
-        config = {"configurable": {"thread_id": f"query_id_{len(st.session_state.web_history)}"}}
-
-        # Use a stable loading spinner instead of unstable streaming loops
-        with st.spinner("🧠 LangGraph Self-Healing Agent Execution Tree Active..."):
-            output = sql_agent.invoke(initial_state, config=config)
-        
-        # Extract operational values
-        final_explanation = output.get("final_explanation")
-        final_sql = output.get("generated_sql")
-        error_feedback = output.get("error_feedback")
+        # Invoke compiled state machine with a fixed thread configuration
+        config = {"configurable": {"thread_id": "streamlit_session"}}
+        output = sql_agent.invoke(initial_state, config=config)
         
         # Render responses based on state exit outcomes
-        if error_feedback and not final_explanation:
-            error_msg = f"❌ Sorry, I couldn't resolve the database query safely within 3 automated tries.\n\n*Database Error Catch:* `{error_feedback}`"
+        if output.get("error_feedback"):
+            error_msg = f"❌ Sorry, I couldn't resolve the database query syntax safely within 3 automated tries."
             explanation_placeholder.markdown(error_msg)
             status_box.error("Graph Ended: Execution Failures encountered.")
             st.session_state.web_history.append({"role": "assistant", "content": error_msg})
         
-        elif final_explanation:
+        elif output.get("final_explanation"):
+            final_ans = output.get("final_explanation")
+            final_sql = output.get("generated_sql")
+            
             # Print values cleanly onto display slots
-            explanation_placeholder.markdown(final_explanation)
-            if final_sql:
-                sql_placeholder.code(final_sql, language="sql")
+            explanation_placeholder.markdown(final_ans)
+            sql_placeholder.code(final_sql, language="sql")
             
             status_box.success("✅ Execution Completed Successfully!")
             
             # Save elements to persistent visual context loops
             st.session_state.web_history.append({
                 "role": "assistant", 
-                "content": final_explanation,
+                "content": final_ans,
+                "sql": final_sql
+            })
+            
+            # Append query details to the background Llama 3 memory payload
+            st.session_state.graph_history.append({
+                "question": user_question,
                 "sql": final_sql
             })

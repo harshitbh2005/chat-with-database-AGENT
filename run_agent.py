@@ -72,7 +72,7 @@ def get_sql_from_llm(user_question, error_feedback=None, history=None):
         model='llama-3.1-8b-instant', 
         messages=messages
     )
-    return response.choices.message.content.strip()
+    return response.choices[0].message.content.strip()
 
 
 def get_english_explanation(user_question, db_results):
@@ -97,7 +97,7 @@ def get_english_explanation(user_question, db_results):
             {'role': 'user', 'content': user_content}
         ]
     )
-    return response.choices.message.content.strip()
+    return response.choices[0].message.content.strip()
 
 
 # ==========================================
