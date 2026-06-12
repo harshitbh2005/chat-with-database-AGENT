@@ -1,5 +1,23 @@
 import streamlit as st
+import os
+import sqlite3
 from run_agent import sql_agent, AgentState
+
+# ============================================================
+# AUTOMATIC CLOUD DATABASE INITIALIZATION CHECK
+# ============================================================
+def verify_and_init_db():
+    db_file = 'ecommerce.db'
+    # If the file doesn't exist, or exists but is completely empty (0 bytes)
+    if not os.path.exists(db_file) or os.path.getsize(db_file) == 0:
+        try:
+            import init_db
+            st.sidebar.success("🚀 Cloud database seeded successfully!")
+        except Exception as e:
+            st.sidebar.error(f"Database auto-seeding failed: {e}")
+
+verify_and_init_db()
+# ============================================================
 
 # 1. Page Configurations
 st.set_page_config(
@@ -58,13 +76,13 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             "chat_history": st.session_state.graph_history
         }
         
-        # Invoke compiled state machine with a fixed thread configuration
-        config = {"configurable": {"thread_id": "streamlit_session"}}
+        # Use a dynamic unique session configuration configuration for accuracy
+        config = {"configurable": {"thread_id": f"session_{len(st.session_state.web_history)}"}}
         output = sql_agent.invoke(initial_state, config=config)
         
         # Render responses based on state exit outcomes
         if output.get("error_feedback"):
-            error_msg = "❌ Sorry, I couldn't resolve the database query syntax safely within 3 automated tries."
+            error_msg = f"❌ Sorry, I couldn't resolve the database query syntax safely within 3 automated tries.\n\n*Last Engine Error:* `{output.get('error_feedback')}`"
             explanation_placeholder.markdown(error_msg)
             status_box.error("Graph Ended: Execution Failures encountered.")
             st.session_state.web_history.append({"role": "assistant", "content": error_msg})

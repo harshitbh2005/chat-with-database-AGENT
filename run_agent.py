@@ -1,7 +1,7 @@
 import sqlite3
 import re
-import streamlit as st  # Added to read secrets safely
-from groq import Groq   # Swapped from ollama to groq
+import streamlit as st  
+from groq import Groq   
 from typing import TypedDict, Optional, List, Any
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver 
@@ -68,7 +68,6 @@ def get_sql_from_llm(user_question, error_feedback=None, history=None):
         """
         messages.append({'role': 'user', 'content': healing_context})
 
-    # FIXED: Updated model name to active production version
     response = client.chat.completions.create(
         model='llama-3.1-8b-instant', 
         messages=messages
@@ -91,7 +90,6 @@ def get_english_explanation(user_question, db_results):
     """
     user_content = f"User Question: {user_question}\nRaw Database Output: {str(db_results)}"
     
-    # FIXED: Updated model name to active production version
     response = client.chat.completions.create(
         model='llama-3.1-8b-instant',
         messages=[
@@ -142,7 +140,7 @@ def execute_query_node(state: AgentState) -> dict:
         return {"db_results": results, "error_feedback": None, "generated_sql": cleaned_sql}
     except Exception as e:
         print(f"⚠️ [AI Workstation]: SQL failed -> {e}")
-        # FIXED: Returning clean raw error text string so self-healing prompt works
+        # FIXED: Only return clean raw exception string so the next healing prompt doesn't degrade
         return {"error_feedback": str(e), "db_results": None}
 
 
