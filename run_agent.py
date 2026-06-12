@@ -143,7 +143,10 @@ def execute_query_node(state: AgentState) -> dict:
         return {"db_results": results, "error_feedback": None, "generated_sql": cleaned_sql}
     except Exception as e:
         print(f"⚠️ [AI Workstation]: SQL failed -> {e}")
-        return {"error_feedback": f"Query tried: {cleaned_sql}\nError: {e}", "db_results": None}
+        # ============================================================
+        # FIX: ONLY PASS THE RAW ERROR STRING SO THE LLM CAN CURE IT
+        # ============================================================
+        return {"error_feedback": str(e), "db_results": None}
 
 
 def explain_results_node(state: AgentState) -> dict:
