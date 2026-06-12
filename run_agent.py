@@ -1,3 +1,4 @@
+# run_agent.py
 import sqlite3
 import datetime
 import streamlit as st  
@@ -52,11 +53,6 @@ def classify_user_intent(user_question: str) -> str:
 
 
 def get_sql_from_llm(user_question: str, error_feedback: str = None, history: list = None) -> str:
-    """
-    UPDATED: Generates deterministic SQLite code based on conversation context, enforcing strict
-    relational database rules and anchoring dynamic calendar calculations.
-    """
-    # Dynamically pull the exact active calendar year inside the runtime environment context
     current_year = datetime.datetime.now().year
     last_year = current_year - 1
     
@@ -71,25 +67,20 @@ def get_sql_from_llm(user_question: str, error_feedback: str = None, history: li
     ### DATABASE SCHEMA Matrix:
     {DATABASE_SCHEMA}
     
+    ### CRITICAL AS ALIAS RULE:
+    Whenever you generate an aggregate calculation function (COUNT, SUM, AVG, MIN, MAX), you MUST explicitly name the output column using an descriptive 'AS' alias (e.g., SELECT COUNT(order_id) AS total_orders_found ...). Never return raw un-aliased aggregate functions.
+
     ### EXPLICIT BREAKDOWN IMPLEMENTATION PATTERNS:
-    User Question: "how much money we made last year?"
-    -> CORRECT QUERY: SELECT SUM(total_amount) FROM orders WHERE order_year = {last_year}
+    User Question: "how many in 2025?"
+    -> CORRECT QUERY: SELECT COUNT(order_id) AS total_orders FROM orders WHERE order_year = 2025
     
     User Question: "which gender purchase our products the most?"
-    -> WRONG QUERY: SELECT gender, SUM(total_amount) FROM customers JOIN orders ... LIMIT 1
-    -> CORRECT QUERY: SELECT gender, SUM(total_amount) FROM customers INNER JOIN orders ON customers.customer_id = orders.customer_id GROUP BY gender ORDER BY SUM(total_amount) DESC
-    (Reason: Do NOT use LIMIT 1 when comparing distributions or relative majorities, as it hides categories from the breakdown analyst).
-
-    User Question: "which year we made most sales?"
-    -> CORRECT QUERY: SELECT order_year, SUM(total_amount) FROM orders GROUP BY order_year ORDER BY SUM(total_amount) DESC
-    (Reason: You must SELECT the calculation metrics and avoid LIMIT cuts so the analyst sees all records).
+    -> CORRECT QUERY: SELECT gender, SUM(total_amount) AS total_spending FROM customers INNER JOIN orders ON customers.customer_id = orders.customer_id GROUP BY gender ORDER BY total_spending DESC
 
     ### STRICTOR STRUCTURAL LAWS:
-    1. NO COLUMN HALLUCINATIONS: Do NOT invent fields like 'city', 'state', 'location', 'tracking_status', or 'shipping_code'. 
-    2. DEMOGRAPHIC TARGETS: If asked "where" or "which place" to advertise, query customer 'profession' or 'gender' spending groups.
-    3. RELATIVE TIME FILTERS: Always map relative dates using the specific integers provided in the CURRENT DATE ENVIRONMENT section.
-    4. MANDATORY MATRIX DATA: For any comparison, breakdown, majority search ("most", "highest distribution", "percentages"), you MUST return ALL categories via GROUP BY. Do NOT append LIMIT clauses.
-    5. NO CODE WRAPPERS: Return ONLY raw SQL text. Never wrap output in markdown syntax (no backticks, no ```sql).
+    1. NO COLUMN HALLUCINATIONS: Do NOT invent fields.
+    2. MANDATORY MATRIX DATA: For any comparison breakdown, do NOT append LIMIT clauses unless looking for a single top entry.
+    3. NO CODE WRAPPERS: Return ONLY raw SQL text. Never wrap output in markdown syntax (no backticks, no ```sql).
     """
     
     messages = [{'role': 'system', 'content': system_prompt}]
@@ -104,7 +95,7 @@ def get_sql_from_llm(user_question: str, error_feedback: str = None, history: li
     if error_feedback:
         messages.append({
             'role': 'user', 
-            'content': f"CRITICAL REWRITE REQUIRED: Your previous query failed verification or returned a blind spot. Fix instruction: {error_feedback}"
+            'content': f"CRITICAL REWRITE REQUIRED: Your previous query failed verification. Fix instruction: {error_feedback}"
         })
 
     response = client.chat.completions.create(
@@ -116,43 +107,29 @@ def get_sql_from_llm(user_question: str, error_feedback: str = None, history: li
 
 
 def verify_sql_logic(user_question: str, generated_sql: str, db_results: list) -> str:
-    system_prompt = f"""You are a QA Database Auditor. Check if the generated SQL statement safely and comprehensively answers the user's question using ONLY valid columns.
-    
-    AVAILABLE SCHEMA MATRIX:
-    {DATABASE_SCHEMA}
-    
-    CRITICAL CONSTRAINT: Do NOT recommend adding columns like 'city', 'state', or 'location'. They do not exist. 
-    If the question seeks demographic targets, ensure the SQL groups by 'profession', 'gender', or 'age'.
-    
-    Respond with exactly 'PASSED' if the query logic is safe and execution can complete.
-    If it is wrong, respond with a direct description of what to fix without hallucinating new columns."""
+    system_prompt = f"""You are a QA Database Auditor. Check if the generated SQL statement safely answers the question using valid columns and proper descriptive 'AS' aliases.
+    Respond with exactly 'PASSED' if the query logic is complete. If it is wrong, describe what to fix."""
     
     user_content = f"Question: {user_question}\nGenerated SQL: {generated_sql}\nReturned Data Matrix: {str(db_results)}"
     response = client.chat.completions.create(
         model='llama-3.1-8b-instant',
-        messages=[
-            {'role': 'system', 'content': system_prompt}, 
-            {'role': 'user', 'content': user_content}
-        ],
+        messages=[{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': user_content}],
         temperature=0.0
     )
     return response.choices[0].message.content.strip()
 
 
 def get_english_explanation(user_question: str, db_results: list) -> str:
-    """
-    UPDATED: Strictly grounds the analyst to your local dataset and handles empty states gracefully.
-    """
     system_prompt = """You are a direct Nike Retail Analytics Consultant.
+    Review the structured column-value data records carefully and answer the user's question.
     
-    CRITICAL RESTRICTION LAWS:
-    1. You are an analyst for THIS specific store database only. Never mention global corporate revenue, billions, or market reports.
-    2. If the Data Matrix is empty, None, or evaluates to no entries (e.g., '[]', '[(None,)]'), you MUST state directly: "No sales records match this criteria in our store database." Do NOT make up numbers.
-    3. Give the exact metric answers from the provided data matrix in your very first sentence. No storytelling.
-    4. Use short sentences and punchy markdown bullet points.
+    CRITICAL INSTRUCTIONS:
+    1. Give the exact number response matching the labeled keys in your very first sentence. 
+    2. Read the label names carefully (e.g., if total_orders is 5, it means 5 orders were placed, NOT \$5).
+    3. Use short sentences and punchy markdown bullet points. Never display raw brackets or dictionary formats.
     """
     
-    user_content = f"User Question: {user_question}\nData Matrix: {str(db_results)}"
+    user_content = f"User Question: {user_question}\nStructured Data Matrix Input: {str(db_results)}"
     response = client.chat.completions.create(
         model='llama-3.1-8b-instant',
         messages=[{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': user_content}],
@@ -188,10 +165,16 @@ def execute_query_node(state: AgentState) -> dict:
     cleaned_sql = raw_sql.replace("```sql", "").replace("```SQL", "").replace("```", "").strip()
     try:
         conn = sqlite3.connect('ecommerce.db')
+        # FIX: Force sqlite3 to return rows as mapped column dictionaries instead of blind tuples
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        results = cursor.execute(cleaned_sql).fetchall()
+        raw_rows = cursor.execute(cleaned_sql).fetchall()
+        
+        # Unpack SQL rows into explicit key-value dictionary lists for the explanation node
+        structured_results = [dict(row) for row in raw_rows]
         conn.close()
-        return {"db_results": results, "error_feedback": None, "generated_sql": cleaned_sql}
+        
+        return {"db_results": structured_results, "error_feedback": None, "generated_sql": cleaned_sql}
     except Exception as e:
         return {"error_feedback": f"SQLite Syntax Error: {str(e)}", "db_results": None}
 
@@ -216,6 +199,7 @@ builder.add_node("generate_query", generate_query_node)
 builder.add_node("execute_query", execute_query_node)
 builder.add_node("verify_results", verify_results_node)
 builder.add_node("explain_results", explain_results_node)
+
 builder.set_entry_point("guardrail")
 
 def route_after_guardrail(state: AgentState) -> str:
@@ -236,4 +220,5 @@ def route_after_verification(state: AgentState) -> str:
 
 builder.add_conditional_edges("verify_results", route_after_verification, {"retry": "generate_query", "fail": END, "success": "explain_results"})
 builder.add_edge("explain_results", END)
+
 sql_agent = builder.compile(checkpointer=MemorySaver())
