@@ -1,3 +1,4 @@
+# run_agent.py
 import sqlite3
 import streamlit as st  
 from groq import Groq   
@@ -56,8 +57,8 @@ def get_sql_from_llm(user_question: str, error_feedback: str = None, history: li
     {DATABASE_SCHEMA}
     
     STRICT COLUMN RULES:
-    1. Only query columns listed in the schema. Do NOT invent fields like 'city', 'state', 'location', or 'country'.
-    2. If asked 'where' to target or advertise, interpret this as finding the highest spending or highest ordering customer 'profession' or 'gender' segment.
+    1. Only query columns listed in the schema. Do NOT invent fields.
+    2. When using a GROUP BY clause or aggregate functions (like SUM, COUNT, AVG), you MUST explicitly include the calculated metric column in your SELECT statement (e.g., SELECT order_year, SUM(total_amount) ...). Never hide the calculation only inside the ORDER BY clause.
     3. Return ONLY the raw executable SQL string. No markdown, no backticks.
     """
     messages = [{'role': 'system', 'content': system_prompt}]
