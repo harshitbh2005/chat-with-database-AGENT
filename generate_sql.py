@@ -1,5 +1,5 @@
-import streamlit as st  
-from groq import Groq   
+import streamlit as st  # Added to access cloud secrets
+from groq import Groq   # Swapped from ollama to groq
 
 # Initialize the Groq Client safely using Streamlit secrets
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
@@ -49,11 +49,12 @@ def get_sql_from_llm(user_question, error_feedback=None):
         """
         messages.append({'role': 'user', 'content': healing_context})
 
+    # Swapped from ollama.chat to cloud-hosted Groq
     response = client.chat.completions.create(
-        model='llama-3.1-8b-instant', 
+        model='llama3-8b-8192', 
         messages=messages
     )
-    return response.choices[0].message.content.strip()
+    return response.choices.message.content.strip()
 
 
 def get_english_explanation(user_question, db_results):
@@ -67,11 +68,12 @@ def get_english_explanation(user_question, db_results):
     
     user_content = f"User Question: {user_question}\nRaw Database Output: {str(db_results)}"
 
+    # Swapped from ollama.chat to cloud-hosted Groq
     response = client.chat.completions.create(
-        model='llama-3.1-8b-instant',
+        model='llama3-8b-8192',
         messages=[
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': user_content}
         ]
     )
-    return response.choices[0].message.content.strip()
+    return response.choices.message.content.strip()

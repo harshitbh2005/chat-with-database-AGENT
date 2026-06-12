@@ -1,12 +1,13 @@
 import sqlite3
 import re
-import streamlit as st  
-from groq import Groq   
+import streamlit as st  # Added to read secrets safely
+from groq import Groq   # Swapped from ollama to groq
 from typing import TypedDict, Optional, List, Any
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver 
 
 # Initialize the Groq Client safely using Streamlit secrets
+# This will pull from your local secrets file or the cloud dashboard dashboard
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 # ==========================================
@@ -68,8 +69,9 @@ def get_sql_from_llm(user_question, error_feedback=None, history=None):
         """
         messages.append({'role': 'user', 'content': healing_context})
 
+    # Swapped from ollama.chat to cloud-hosted Groq
     response = client.chat.completions.create(
-        model='llama-3.1-8b-instant', 
+        model='llama3-8b-8192', 
         messages=messages
     )
     return response.choices[0].message.content.strip()
@@ -90,8 +92,9 @@ def get_english_explanation(user_question, db_results):
     """
     user_content = f"User Question: {user_question}\nRaw Database Output: {str(db_results)}"
     
+    # Swapped from ollama.chat to cloud-hosted Groq
     response = client.chat.completions.create(
-        model='llama-3.1-8b-instant',
+        model='llama3-8b-8192',
         messages=[
             {'role': 'system', 'content': system_prompt},
             {'role': 'user', 'content': user_content}
@@ -140,7 +143,7 @@ def execute_query_node(state: AgentState) -> dict:
         return {"db_results": results, "error_feedback": None, "generated_sql": cleaned_sql}
     except Exception as e:
         print(f"⚠️ [AI Workstation]: SQL failed -> {e}")
-        return {"error_feedback": str(e), "db_results": None}
+        return {"error_feedback": f"Query tried: {cleaned_sql}\nError: {e}", "db_results": None}
 
 
 def explain_results_node(state: AgentState) -> dict:
