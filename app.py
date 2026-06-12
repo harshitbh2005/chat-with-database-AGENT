@@ -16,9 +16,6 @@ st.markdown("Ask natural language questions against a cloud-hosted SQLite `ecomm
 if "web_history" not in st.session_state:
     st.session_state.web_history = []  # Display logs for chat bubbles
 
-if "graph_history" not in st.session_state:
-    st.session_state.graph_history = []  # Context payload lists passed to Llama 3
-
 # 3. Sidebar System Logs Layout
 with st.sidebar:
     st.header("⚙️ Agentic Engine Monitoring")
@@ -48,7 +45,7 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
         
         status_box.warning("🤖 Graph State Processing Active...")
         
-        # Build initial dictionary state frame matching our TypedDict schema
+        # Build initial state with an empty history array to keep execution clean
         initial_state: AgentState = {
             "user_question": user_question,
             "attempt_count": 0,
@@ -56,27 +53,24 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             "generated_sql": None,
             "db_results": None,
             "final_explanation": None,
-            "chat_history": st.session_state.graph_history
+            "chat_history": []
         }
         
-        # Use a dynamic session identifier
-        config = {"configurable": {"thread_id": f"session_{len(st.session_state.web_history)}"}}
+        # Create a completely fresh thread ID config for each turn to avoid memory leakage
+        config = {"configurable": {"thread_id": f"query_id_{len(st.session_state.web_history)}"}}
 
-        # ============================================================
-        # FIX: USE A SIMPLE, DURABLE LOADING CONTAINER WITHOUT STREAM LOOPS
-        # ============================================================
+        # Use a stable loading spinner instead of unstable streaming loops
         with st.spinner("🧠 LangGraph Self-Healing Agent Execution Tree Active..."):
-            # Invoke the agent directly in one single, safe operation
             output = sql_agent.invoke(initial_state, config=config)
         
-        # Extract variables securely
+        # Extract operational values
         final_explanation = output.get("final_explanation")
         final_sql = output.get("generated_sql")
         error_feedback = output.get("error_feedback")
         
         # Render responses based on state exit outcomes
         if error_feedback and not final_explanation:
-            error_msg = "❌ Sorry, I couldn't resolve the database query syntax safely within 3 automated tries."
+            error_msg = f"❌ Sorry, I couldn't resolve the database query safely within 3 automated tries.\n\n*Database Error Catch:* `{error_feedback}`"
             explanation_placeholder.markdown(error_msg)
             status_box.error("Graph Ended: Execution Failures encountered.")
             st.session_state.web_history.append({"role": "assistant", "content": error_msg})
@@ -93,11 +87,5 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             st.session_state.web_history.append({
                 "role": "assistant", 
                 "content": final_explanation,
-                "sql": final_sql
-            })
-            
-            # Append query details to the background Llama 3 memory payload
-            st.session_state.graph_history.append({
-                "question": user_question,
                 "sql": final_sql
             })
