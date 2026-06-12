@@ -8,7 +8,6 @@ from run_agent import sql_agent, AgentState
 # ============================================================
 def verify_and_init_db():
     db_file = 'ecommerce.db'
-    # Check if the database doesn't exist or is an empty 0-byte file
     if not os.path.exists(db_file) or os.path.getsize(db_file) == 0:
         try:
             conn = sqlite3.connect(db_file)
@@ -37,7 +36,7 @@ def verify_and_init_db():
             
             # Seed Starting Data safely
             cursor.execute("SELECT COUNT(*) FROM customers")
-            if cursor.fetchone()[0] == 0:
+            if cursor.fetchone() == 0:
                 cursor.executemany("""
                 INSERT INTO customers (name, email, join_date) VALUES (?, ?, ?);
                 """, [
@@ -103,7 +102,7 @@ for message in st.session_state.web_history:
             st.code(message["sql"], language="sql")
 
 # 5. Handle New User Input
-if user_question := st.chat_input("Ask your database a question (e.g., 'How many orders in 2026 respectively?')"):
+if user_question := st.chat_input("Ask your database a question (e.g., 'How many orders do we have per year?')"):
     
     # Render user bubble immediately
     with st.chat_message("user"):
@@ -128,7 +127,9 @@ if user_question := st.chat_input("Ask your database a question (e.g., 'How many
             "chat_history": st.session_state.graph_history
         }
         
-        config = {"configurable": {"thread_id": "streamlit_session"}}
+        # FIXED: Dynamic unique thread_id string generated per query to prevent context bleeding
+        unique_thread_id = f"query_id_{len(st.session_state.web_history)}"
+        config = {"configurable": {"thread_id": unique_thread_id}}
         output = sql_agent.invoke(initial_state, config=config)
         
         # Render responses based on state exit outcomes

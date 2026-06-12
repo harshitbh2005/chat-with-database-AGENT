@@ -41,6 +41,7 @@ def get_sql_from_llm(user_question, error_feedback=None, history=None):
     2. Do NOT wrap the query in markdown code blocks like ```sql ... ```.
     3. Do NOT include any explanations, greetings, or text other than the SQL query itself.
     4. MULTI-YEAR / RESPECTIVELY BREAKDOWNS: If the user asks for metrics broken down by year, month, or "respectively", you MUST select the year expression AND use a GROUP BY clause to return a vertical list of rows.
+    5. GROUP BY RULES: For any questions asking about "what year", "how many per year", or breakdowns "respectively", you MUST select the year column using strftime('%Y', order_date) and add a GROUP BY clause at the end so it returns clean vertical rows. Never combine years into cross-tab case expressions horizontally.
 
     GOOD EXAMPLE FOR RESPECTIVELY/BREAKDOWNS:
     User Question: "how many orders did we get in 2025 and 2026 respectively?"
@@ -140,7 +141,7 @@ def execute_query_node(state: AgentState) -> dict:
         return {"db_results": results, "error_feedback": None, "generated_sql": cleaned_sql}
     except Exception as e:
         print(f"⚠️ [AI Workstation]: SQL failed -> {e}")
-        # FIXED: Only return clean raw exception string so the next healing prompt doesn't degrade
+        # FIXED: Returning raw exception string string explicitly so prompt routing stays pure
         return {"error_feedback": str(e), "db_results": None}
 
 
