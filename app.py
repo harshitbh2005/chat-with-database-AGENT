@@ -100,8 +100,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("👟 Nike Retail Analytics Dashboard")
-st.markdown("Analyze customer demographics, sales trends, and golden buyers using **Llama 3.1 & LangGraph** over a cloud-hosted SQLite database.")
+st.title("👟 Nike AgenticAI Database Dashboard")
+st.markdown("Analyze Nike'scustomer demographics, sales trends, and golden buyers using **Llama 3.1 & LangGraph** over a cloud-hosted SQLite database.")
 
 # 2. Session States
 if "web_history" not in st.session_state:
