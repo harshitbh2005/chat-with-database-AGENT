@@ -1,5 +1,5 @@
-# run_agent.py
 import sqlite3
+import datetime
 import streamlit as st  
 from groq import Groq   
 from typing import TypedDict, Optional, List, Any
@@ -53,22 +53,43 @@ def classify_user_intent(user_question: str) -> str:
 
 def get_sql_from_llm(user_question: str, error_feedback: str = None, history: list = None) -> str:
     """
-    Generates deterministic SQLite code based on conversation context, enforcing strict
-    relational database rules to prevent data blind spots and column hallucinations.
+    UPDATED: Generates deterministic SQLite code based on conversation context, enforcing strict
+    relational database rules and anchoring dynamic calendar calculations.
     """
+    # Dynamically pull the exact active calendar year inside the runtime environment context
+    current_year = datetime.datetime.now().year
+    last_year = current_year - 1
+    
     system_prompt = f"""You are an expert SQLite Data Assistant for a Nike Retail Store.
     Convert the user's natural language question into valid, executable SQLite syntax based on the schema below.
+    
+    ### CURRENT DATE ENVIRONMENT:
+    - The active runtime calendar year right now is: {current_year}.
+    - Relative phrases like "last year" mean explicitly year number: {last_year}.
+    - "This year" means explicitly year number: {current_year}.
     
     ### DATABASE SCHEMA Matrix:
     {DATABASE_SCHEMA}
     
-    ### CRITICAL COMPLIANCE RULES:
-    1. STRICT COLUMN BOUNDS: Only query columns that explicitly exist in the schema. Do NOT invent fields like 'city', 'state', 'location', 'country', 'tracking_status', 'shipping_code', or 'reviews'.
-    2. INTERPRETING LOCATION/TARGETS: If asked "where" or "which place" to promote/advertise, interpret this as finding the highest-spending or highest-ordering customer 'profession' or 'gender' segments. 
-    3. MANDATORY AGGREGATION COLUMNS: When using aggregate functions (SUM, COUNT, AVG), you MUST include the calculated metric column in your SELECT statement alongside the grouping attribute. Never hide calculations solely inside an ORDER BY clause.
-    4. NO LIMIT BLIND SPOTS ON BREAKDOWNS: For any question asking for a breakdown, comparison, distribution, or percentage (e.g., "by year", "which gender", "compare professions"), do NOT use a LIMIT clause. Return all active rows/categories so the analyst node can see the full dataset to compute accurate breakdowns.
-    5. TRANSACTION INTEGRITY: For questions regarding "purchases", "sales", "spending", or "items bought", you MUST use an INNER JOIN to link the 'customers' and 'orders' tables on customer_id to evaluate metrics based on actual orders rather than profile registries.
-    6. DETERMINISTIC RESPONSE: Output ONLY the raw executable SQL query string. Do NOT wrap output inside markdown backticks (no ```sql) and do NOT add conversational text or notes.
+    ### EXPLICIT BREAKDOWN IMPLEMENTATION PATTERNS:
+    User Question: "how much money we made last year?"
+    -> CORRECT QUERY: SELECT SUM(total_amount) FROM orders WHERE order_year = {last_year}
+    
+    User Question: "which gender purchase our products the most?"
+    -> WRONG QUERY: SELECT gender, SUM(total_amount) FROM customers JOIN orders ... LIMIT 1
+    -> CORRECT QUERY: SELECT gender, SUM(total_amount) FROM customers INNER JOIN orders ON customers.customer_id = orders.customer_id GROUP BY gender ORDER BY SUM(total_amount) DESC
+    (Reason: Do NOT use LIMIT 1 when comparing distributions or relative majorities, as it hides categories from the breakdown analyst).
+
+    User Question: "which year we made most sales?"
+    -> CORRECT QUERY: SELECT order_year, SUM(total_amount) FROM orders GROUP BY order_year ORDER BY SUM(total_amount) DESC
+    (Reason: You must SELECT the calculation metrics and avoid LIMIT cuts so the analyst sees all records).
+
+    ### STRICTOR STRUCTURAL LAWS:
+    1. NO COLUMN HALLUCINATIONS: Do NOT invent fields like 'city', 'state', 'location', 'tracking_status', or 'shipping_code'. 
+    2. DEMOGRAPHIC TARGETS: If asked "where" or "which place" to advertise, query customer 'profession' or 'gender' spending groups.
+    3. RELATIVE TIME FILTERS: Always map relative dates using the specific integers provided in the CURRENT DATE ENVIRONMENT section.
+    4. MANDATORY MATRIX DATA: For any comparison, breakdown, majority search ("most", "highest distribution", "percentages"), you MUST return ALL categories via GROUP BY. Do NOT append LIMIT clauses.
+    5. NO CODE WRAPPERS: Return ONLY raw SQL text. Never wrap output in markdown syntax (no backticks, no ```sql).
     """
     
     messages = [{'role': 'system', 'content': system_prompt}]
@@ -83,7 +104,7 @@ def get_sql_from_llm(user_question: str, error_feedback: str = None, history: li
     if error_feedback:
         messages.append({
             'role': 'user', 
-            'content': f"CRITICAL REWRITE REQUIRED: Your previous query failed validation or syntax execution. Fix instruction: {error_feedback}"
+            'content': f"CRITICAL REWRITE REQUIRED: Your previous query failed verification or returned a blind spot. Fix instruction: {error_feedback}"
         })
 
     response = client.chat.completions.create(
@@ -119,10 +140,17 @@ def verify_sql_logic(user_question: str, generated_sql: str, db_results: list) -
 
 
 def get_english_explanation(user_question: str, db_results: list) -> str:
+    """
+    UPDATED: Strictly grounds the analyst to your local dataset and handles empty states gracefully.
+    """
     system_prompt = """You are a direct Nike Retail Analytics Consultant.
-    1. Give the exact metric answers in your very first sentence. No storytelling.
-    2. Use short sentences and punchy markdown bullet points.
-    3. If answering target advertisement groups based on profession data, explain clearly."""
+    
+    CRITICAL RESTRICTION LAWS:
+    1. You are an analyst for THIS specific store database only. Never mention global corporate revenue, billions, or market reports.
+    2. If the Data Matrix is empty, None, or evaluates to no entries (e.g., '[]', '[(None,)]'), you MUST state directly: "No sales records match this criteria in our store database." Do NOT make up numbers.
+    3. Give the exact metric answers from the provided data matrix in your very first sentence. No storytelling.
+    4. Use short sentences and punchy markdown bullet points.
+    """
     
     user_content = f"User Question: {user_question}\nData Matrix: {str(db_results)}"
     response = client.chat.completions.create(
@@ -188,7 +216,6 @@ builder.add_node("generate_query", generate_query_node)
 builder.add_node("execute_query", execute_query_node)
 builder.add_node("verify_results", verify_results_node)
 builder.add_node("explain_results", explain_results_node)
-
 builder.set_entry_point("guardrail")
 
 def route_after_guardrail(state: AgentState) -> str:
@@ -209,5 +236,4 @@ def route_after_verification(state: AgentState) -> str:
 
 builder.add_conditional_edges("verify_results", route_after_verification, {"retry": "generate_query", "fail": END, "success": "explain_results"})
 builder.add_edge("explain_results", END)
-
 sql_agent = builder.compile(checkpointer=MemorySaver())
