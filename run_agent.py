@@ -1,4 +1,3 @@
-# run_agent.py
 import sqlite3
 import streamlit as st  
 from groq import Groq   
@@ -48,7 +47,6 @@ def classify_user_intent(user_question: str) -> str:
         ],
         temperature=0.0
     )
-    # FIX: Added [0] index to choices list element
     return response.choices[0].message.content.strip()
 
 
@@ -73,7 +71,6 @@ def get_sql_from_llm(user_question: str, error_feedback: str = None, history: li
         messages.append({'role': 'user', 'content': f"CRITICAL FIX REQUIRED: Your previous attempt failed. Fix instruction: {error_feedback}"})
 
     response = client.chat.completions.create(model='llama-3.1-8b-instant', messages=messages, temperature=0.0)
-    # FIX: Ensure index format matches standard layout
     return response.choices[0].message.content.strip()
 
 
@@ -98,7 +95,6 @@ def verify_sql_logic(user_question: str, generated_sql: str, db_results: list) -
         ],
         temperature=0.0
     )
-    # FIX: Added [0] index to choices list element
     return response.choices[0].message.content.strip()
 
 
@@ -114,7 +110,6 @@ def get_english_explanation(user_question: str, db_results: list) -> str:
         messages=[{'role': 'system', 'content': system_prompt}, {'role': 'user', 'content': user_content}],
         temperature=0.1
     )
-    # FIX: Ensure consistency across endpoints
     return response.choices[0].message.content.strip()
 
 # ==========================================
